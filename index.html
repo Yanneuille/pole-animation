@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pôle Animation – School RP</title>
+
+<!-- =====================================================================
+     STYLE  (les couleurs se changent juste en dessous, dans :root)
+     ===================================================================== -->
+<style>
+  :root {
+    --bg: #0f1220;        /* fond de la page */
+    --panel: #181c30;     /* fond des cartes */
+    --panel2: #20253d;    /* fond des champs */
+    --text: #e8eaf6;
+    --muted: #9aa0c0;
+    --accent: #7c5cff;    /* couleur principale (boutons, onglet actif) */
+    --ok: #22c55e;
+    --bad: #ef4444;
+    --warn: #f59e0b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); line-height: 1.45;
+         font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #app { max-width: 880px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.3rem; margin: 0; }
+  h2 { font-size: 1.1rem; margin: 22px 0 10px; }
+  h2.day { color: var(--accent); font-size: 1rem; margin: 20px 0 8px; text-transform: none; }
+  h3 { margin: 0; font-size: 1.05rem; }
+  p { margin: 8px 0; }
+  a { color: var(--accent); }
+  .muted { color: var(--muted); }
+  .small { font-size: .85rem; }
+  .center { text-align: center; }
+  .empty { color: var(--muted); padding: 14px; text-align: center; background: var(--panel); border-radius: var(--radius); }
+
+  header { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .me { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+  nav { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; border-bottom: 1px solid var(--panel2); }
+  .tab { background: transparent; color: var(--muted); border: 0; padding: 9px 13px; border-radius: 10px;
+         cursor: pointer; white-space: nowrap; font-size: .95rem; }
+  .tab.on { background: var(--accent); color: #fff; }
+  .dot { background: var(--bad); color: #fff; border-radius: 99px; padding: 1px 7px; font-size: .75rem; margin-left: 4px; }
+
+  .card { background: var(--panel); border-radius: var(--radius); padding: 14px 16px; margin: 0 0 10px; }
+  .card.done { opacity: .6; }
+  .card.st-pending { border-left: 4px solid var(--warn); }
+  .card.st-refused { border-left: 4px solid var(--bad); }
+  .card-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+  .row { margin: 6px 0; font-size: .93rem; }
+  .warn { color: var(--warn); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+
+  .chip { display: inline-block; font-size: .75rem; padding: 2px 9px; border-radius: 99px; white-space: nowrap;
+          color: var(--c, #fff); border: 1px solid var(--c, #fff); background: color-mix(in srgb, var(--c, #fff) 14%, transparent); }
+  .admin { display: inline-block; font-size: .72rem; padding: 2px 8px; border-radius: 6px; margin-left: 4px;
+           background: #facc15; color: #3b2f00; font-weight: 700; white-space: nowrap; }
+
+  .btn { border: 0; border-radius: 10px; padding: 8px 14px; cursor: pointer; font-size: .9rem; color: #fff; background: var(--panel2); }
+  .btn.primary { background: var(--accent); }
+  .btn.ok { background: var(--ok); color: #05260f; font-weight: 600; }
+  .btn.bad { background: var(--bad); }
+  .btn.ghost { background: transparent; border: 1px solid var(--panel2); color: var(--muted); }
+  .btn:hover { filter: brightness(1.15); }
+
+  label { display: block; margin: 10px 0; font-size: .9rem; color: var(--muted); }
+  input, textarea, select { width: 100%; margin-top: 4px; padding: 10px; border-radius: 10px; border: 1px solid var(--panel2);
+          background: var(--panel2); color: var(--text); font: inherit; }
+  textarea { min-height: 70px; resize: vertical; }
+  .check { display: flex; align-items: center; gap: 8px; margin: 0; }
+  .check input { width: auto; margin: 0; }
+  .filter { margin-bottom: 10px; max-width: 280px; }
+
+  .auth { max-width: 380px; margin: 60px auto; }
+  .weeknav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 14px 0 4px; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: var(--radius); overflow: hidden; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--panel2); }
+  th { color: var(--muted); font-weight: 500; font-size: .85rem; }
+  td.num, th.num { text-align: center; }
+  tr:last-child td { border-bottom: 0; }
+
+  .member { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .member.pending { border-left: 4px solid var(--warn); }
+  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .controls select { width: auto; margin: 0; }
+
+  #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(80px); background: var(--ok); color: #05260f;
+           padding: 10px 18px; border-radius: 12px; opacity: 0; transition: .25s; max-width: 90vw; font-weight: 600; z-index: 10; }
+  #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  #toast.bad { background: var(--bad); color: #fff; }
+</style>
+</head>
+
+<body>
+<div id="app"><p class="center muted">Chargement…</p></div>
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* =====================================================================
+   1. CONFIGURATION  ← c'est ici que tu changes les réglages
+   ===================================================================== */
+
+// Les 2 valeurs à copier depuis Supabase > Project Settings > API
+const SUPABASE_URL = "https://jjkgwmljitplywxpgoxw.supabase.co";
+const SUPABASE_KEY = "sb_publishable_lhmwV4Yk2MqSz2gTNawyZQ_f1_-aYEm";
+
+// Les comptes sont créés avec "pseudo@ce-domaine" (aucun mail n'est envoyé).
+// Si Supabase refuse l'adresse ("invalid email"), mets ici un autre nom de domaine.
+const EMAIL_DOMAIN = "animation-rp.com";
+
+// Un event est considéré "fait" une fois ce nombre de minutes écoulé après son début
+const DUREE_EVENT_MIN = 60;
+
+// Les grades. La clé (gerant, responsable...) doit rester identique à setup.sql.
+// level = niveau d'autorité (4 = le plus haut). Tu peux changer label et color.
+const GRADES = {
+  gerant:           { label: "Gérant animation", level: 4, color: "#ef4444" },
+  responsable:      { label: "Responsable",      level: 3, color: "#f59e0b" },
+  animateur_senior: { label: "Animateur senior", level: 2, color: "#3b82f6" },
+  animateur:        { label: "Animateur",        level: 1, color: "#22c55e" },
+};
+
+// Qui a le droit de faire quoi (basé sur le level ci-dessus).
+// ⚠ La vraie sécurité est dans setup.sql ; ici ça ne gère que ce qu'on affiche.
+const level          = p => (p && GRADES[p.grade] ? GRADES[p.grade].level : 0);
+const isManager      = p => level(p) >= 3;   // responsable + gérant : acceptent les demandes, fournissent les gears
+const canOpenServer  = p => level(p) >= 2;   // animateur senior et plus : ouvrent les serveurs privés
+const isGerant       = p => level(p) === 4;  // gérant : gère l'équipe
+
+// Les onglets du site (change l'ordre ou les noms ici)
+const TABS = [
+  { id: "planning", label: "📅 Planning" },
+  { id: "week",     label: "🗓 Semaine" },
+  { id: "requests", label: "📝 Demandes" },
+  { id: "history",  label: "✅ Historique" },
+  { id: "stats",    label: "📊 Stats" },
+  { id: "team",     label: "👥 Équipe" },
+];
+
+
+/* =====================================================================
+   2. OUTILS
+   ===================================================================== */
+
+let db; // le client Supabase
+const state = {
+  session: null,       // connexion en cours
+  me: null,            // mon profil
+  profiles: {},        // tous les profils, par id
+  events: [],          // tous les events
+  tab: "planning",     // onglet affiché
+  weekOffset: 0,       // 0 = cette semaine, -1 = la précédente...
+  authMode: "login",   // "login" ou "signup"
+  histFilter: "",      // filtre de l'historique
+};
+
+// Empêche l'injection de HTML dans les textes écrits par les utilisateurs
+const esc = s => String(s ?? "").replace(/[&<>"']/g,
+  c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const cap     = s => s.charAt(0).toUpperCase() + s.slice(1);
+const fmtDay  = d => new Date(d).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+const fmtTime = d => new Date(d).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+const byDate  = (a, b) => new Date(a.event_date) - new Date(b.event_date);
+
+const startMs = ev => new Date(ev.event_date).getTime();
+const isDone  = ev => Date.now() > startMs(ev) + DUREE_EVENT_MIN * 60000;
+
+// Lundi 00:00 de la semaine qui contient la date d
+function startOfWeek(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  return x;
+}
+
+function toast(msg, bad) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className = "show" + (bad ? " bad" : "");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => (t.className = ""), 3500);
+}
+
+const empty = msg => `<p class="empty">${msg}</p>`;
+
+// Petits morceaux d'affichage réutilisés partout
+const adminBadge = p => (p && p.is_admin ? ` <span class="admin">🛡 Admin serveur</span>` : "");
+const gradeChip  = g => (GRADES[g] ? `<span class="chip" style="--c:${GRADES[g].color}">${GRADES[g].label}</span>` : "");
+function who(id) {                       // "Pseudo 🛡" d'après un id
+  const p = state.profiles[id];
+  return p ? `<strong>${esc(p.username)}</strong>${adminBadge(p)}` : `<span class="muted">inconnu</span>`;
+}
+
+
+/* =====================================================================
+   3. CHARGEMENT DES DONNÉES
+   ===================================================================== */
+
+async function loadAll() {
+  const uid = state.session.user.id;
+
+  const { data: me, error: e1 } = await db.from("profiles").select("*").eq("id", uid).single();
+  if (e1 || !me) throw new Error("Profil introuvable. As-tu bien exécuté setup.sql dans Supabase ?");
+  state.me = me;
+  if (!me.approved) return;               // compte pas encore validé : on s'arrête là
+
+  const [p, e] = await Promise.all([
+    db.from("profiles").select("*").order("username"),
+    db.from("events").select("*").order("event_date"),
+  ]);
+  if (p.error) throw p.error;
+  if (e.error) throw e.error;
+  state.profiles = Object.fromEntries(p.data.map(x => [x.id, x]));
+  state.events = e.data;
+}
+
+async function refresh() {
+  try { await loadAll(); } catch (err) { toast(err.message, true); }
+  render();
+}
+
+
+/* =====================================================================
+   4. AFFICHAGE D'UN EVENT (la "carte")
+   ===================================================================== */
+
+function eventCard(ev, grouped) {
+  const me = state.me;
+  const done = ev.status === "accepted" && isDone(ev);
+  const owner = state.profiles[ev.requested_by];
+  const mgr = isManager(me);
+
+  let h = `<div class="card ${done ? "done" : ""} st-${ev.status}">`;
+
+  // Titre + date + statut
+  const when = grouped ? `🕒 ${fmtTime(ev.event_date)}` : `📅 ${cap(fmtDay(ev.event_date))} à ${fmtTime(ev.event_date)}`;
+  const status = ev.status === "pending" ? `<span class="chip" style="--c:#f59e0b">⏳ En attente</span>`
+               : ev.status === "refused" ? `<span class="chip" style="--c:#ef4444">❌ Refusée</span>`
+               : done ? `<span class="chip" style="--c:#9aa0c0">Terminé</span>` : "";
+  h += `<div class="card-head"><div><h3>${esc(ev.title)}</h3><div class="muted">${when}</div></div>${status}</div>`;
+
+  if (ev.description) h += `<p>${esc(ev.description)}</p>`;
+  h += `<div class="row">🎭 Animé par ${who(ev.requested_by)} ${owner ? gradeChip(owner.grade) : ""}</div>`;
+
+  // --- Serveur privé : qui l'ouvre ? (seulement pour les events acceptés)
+  if (ev.status === "accepted") {
+    h += `<div class="row">🖥 `;
+    h += ev.server_opener
+      ? `Serveur privé ouvert par ${who(ev.server_opener)}`
+      : `<span class="${done ? "muted" : "warn"}">Personne n'a ouvert le serveur privé</span>`;
+    h += `</div>`;
+
+    // --- Gears : demandés par l'animateur / fournis par un responsable ou gérant
+    const showGears = ev.gear_note || ev.gear_by || (mgr && !done);
+    if (showGears) {
+      h += `<div class="row">⚙️ `;
+      if (ev.gear_note) h += `Gears demandés : <em>${esc(ev.gear_note)}</em>. `;
+      h += ev.gear_by ? `Fournis par ${who(ev.gear_by)}` : `<span class="muted">Personne ne fournit de gears pour l'instant</span>`;
+      h += `</div>`;
+    }
+
+    // --- Boutons (uniquement pour les events pas encore terminés)
+    if (!done) {
+      let b = "";
+      if (!ev.server_opener && canOpenServer(me))
+        b += `<button class="btn primary" data-act="takeServer" data-id="${ev.id}">🖥 Je m'occupe d'ouvrir le serveur</button>`;
+      if (ev.server_opener && (ev.server_opener === me.id || mgr))
+        b += `<button class="btn ghost" data-act="dropServer" data-id="${ev.id}">Libérer le serveur</button>`;
+      if (mgr && !ev.gear_by)
+        b += `<button class="btn" data-act="takeGears" data-id="${ev.id}">⚙️ Je fournis les gears</button>`;
+      if (mgr && ev.gear_by && (ev.gear_by === me.id || isGerant(me)))
+        b += `<button class="btn ghost" data-act="dropGears" data-id="${ev.id}">Retirer les gears</button>`;
+      if (b) h += `<div class="actions">${b}</div>`;
+    }
+  }
+
+  // --- Boutons de validation (responsable / gérant) et suppression
+  let b2 = "";
+  if (ev.status === "pending" && mgr) {
+    b2 += `<button class="btn ok" data-act="accept" data-id="${ev.id}">✔ Accepter</button>`;
+    b2 += `<button class="btn bad" data-act="refuse" data-id="${ev.id}">✖ Refuser</button>`;
+  }
+  if (mgr || (ev.requested_by === me.id && ev.status !== "accepted"))
+    b2 += `<button class="btn ghost" data-act="delete" data-id="${ev.id}">Supprimer</button>`;
+  if (b2) h += `<div class="actions">${b2}</div>`;
+
+  return h + `</div>`;
+}
+
+// Affiche une liste d'events avec un titre par jour
+function groupByDay(list) {
+  let html = "", last = "";
+  for (const ev of list) {
+    const key = new Date(ev.event_date).toDateString();
+    if (key !== last) { html += `<h2 class="day">${cap(fmtDay(ev.event_date))}</h2>`; last = key; }
+    html += eventCard(ev, true);
+  }
+  return html;
+}
+
+
+/* =====================================================================
+   5. LES ÉCRANS (un par onglet)
+   ===================================================================== */
+
+// ---- Planning : les prochains events acceptés
+function viewPlanning() {
+  const list = state.events.filter(e => e.status === "accepted" && !isDone(e)).sort(byDate);
+  return `<h2>Prochains events</h2>` + (list.length ? groupByDay(list) : empty("Aucun event prévu pour le moment."));
+}
+
+// ---- Semaine : la liste des events d'une semaine, jour par jour
+function viewWeek() {
+  const start = startOfWeek(new Date());
+  start.setDate(start.getDate() + 7 * state.weekOffset);
+  const end = new Date(start); end.setDate(end.getDate() + 7);
+  const last = new Date(end); last.setDate(last.getDate() - 1);
+
+  const list = state.events
+    .filter(e => e.status === "accepted" && new Date(e.event_date) >= start && new Date(e.event_date) < end)
+    .sort(byDate);
+
+  const short = d => d.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+  let html = `<div class="weeknav">
+      <button class="btn" data-act="weekPrev">← Précédente</button>
+      <div class="center"><strong>${short(start)} – ${short(last)}</strong><div class="muted small">${list.length} event(s)${state.weekOffset === 0 ? " · cette semaine" : ""}</div></div>
+      <button class="btn" data-act="weekNext">Suivante →</button>
+    </div>`;
+  if (state.weekOffset !== 0) html += `<p class="center"><button class="btn ghost" data-act="weekToday">Revenir à cette semaine</button></p>`;
+
+  for (let i = 0; i < 7; i++) {
+    const day = new Date(start); day.setDate(start.getDate() + i);
+    const evs = list.filter(e => new Date(e.event_date).toDateString() === day.toDateString());
+    html += `<h2 class="day">${cap(fmtDay(day))}${day.toDateString() === new Date().toDateString() ? " · aujourd'hui" : ""}</h2>`;
+    html += evs.length ? evs.map(e => eventCard(e, true)).join("") : `<p class="muted small">Aucun event</p>`;
+  }
+  return html;
+}
+
+// ---- Demandes : formulaire + demandes à valider (ou mes demandes)
+function viewRequests() {
+  const me = state.me, mgr = isManager(me);
+
+  // Date proposée par défaut : dans 1h, à l'heure pile (format attendu par datetime-local)
+  const d = new Date(Date.now() + 3600000); d.setMinutes(0, 0, 0);
+  const pad = n => String(n).padStart(2, "0");
+  const defDate = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:00`;
+
+  let html = `<form data-form="request" class="card">
+      <h3>${mgr ? "Créer un event (ajouté directement au planning)" : "Demander un event"}</h3>
+      <label>Nom de l'event<input name="title" required maxlength="80"></label>
+      <label>Date et heure<input type="datetime-local" name="date" required value="${defDate}"></label>
+      <label>Description (optionnel)<textarea name="description" maxlength="500"></textarea></label>
+      <label>Gears demandés (optionnel)<input name="gears" maxlength="120" placeholder="Si tu as besoin de gears, écris lesquels ici"></label>
+      <button class="btn primary">${mgr ? "Ajouter au planning" : "Envoyer la demande"}</button>
+    </form>`;
+
+  if (mgr) {
+    const list = state.events.filter(e => e.status === "pending").sort(byDate);
+    html += `<h2>À valider (${list.length})</h2>` +
+      (list.length ? list.map(e => eventCard(e)).join("") : empty("Aucune demande en attente 🎉"));
+  } else {
+    const list = state.events.filter(e => e.requested_by === me.id && e.status !== "accepted").sort(byDate).reverse();
+    html += `<h2>Mes demandes</h2>` +
+      (list.length ? list.map(e => eventCard(e)).join("") : empty("Aucune demande en attente ou refusée."));
+  }
+  return html;
+}
+
+// ---- Historique : tous les events déjà faits
+function viewHistory() {
+  const all = state.events.filter(e => e.status === "accepted" && isDone(e)).sort(byDate).reverse();
+  const authors = [...new Set(all.map(e => e.requested_by))];
+  const f = state.histFilter;
+  const shown = f ? all.filter(e => e.requested_by === f) : all;
+
+  return `<h2>Events réalisés (${shown.length})</h2>
+    <div class="filter"><select data-act="histFilter">
+      <option value="">Tous les animateurs</option>
+      ${authors.map(id => `<option value="${id}" ${f === id ? "selected" : ""}>${esc(state.profiles[id]?.username || "?")}</option>`).join("")}
+    </select></div>
+    ${shown.length ? shown.map(e => eventCard(e)).join("") : empty("Aucun event réalisé pour le moment.")}`;
+}
+
+// ---- Stats : nombre d'events faits par animateur / animateur senior
+// (on compte les events ACCEPTÉS et TERMINÉS dont la personne est l'animateur)
+function viewStats() {
+  const weekStart = startOfWeek(new Date());
+  const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 7);
+  const done = state.events.filter(e => e.status === "accepted" && isDone(e));
+
+  const rows = Object.values(state.profiles)
+    .filter(p => p.approved && (p.grade === "animateur" || p.grade === "animateur_senior"))
+    .map(p => {
+      const mine = done.filter(e => e.requested_by === p.id);
+      const week = mine.filter(e => new Date(e.event_date) >= weekStart && new Date(e.event_date) < weekEnd).length;
+      return { p, week, total: mine.length };
+    })
+    .sort((a, b) => b.week - a.week || b.total - a.total || a.p.username.localeCompare(b.p.username));
+
+  const sumWeek = rows.reduce((s, r) => s + r.week, 0);
+  const sumTotal = rows.reduce((s, r) => s + r.total, 0);
+
+  return `<h2>Stats des animateurs</h2>
+    <table>
+      <tr><th>Animateur</th><th>Grade</th><th class="num">Cette semaine</th><th class="num">Total</th></tr>
+      ${rows.map(r => `<tr><td>${who(r.p.id)}</td><td>${gradeChip(r.p.grade)}</td><td class="num">${r.week}</td><td class="num">${r.total}</td></tr>`).join("")
+        || `<tr><td colspan="4" class="muted">Aucun animateur pour le moment.</td></tr>`}
+      <tr><td><strong>Total</strong></td><td></td><td class="num"><strong>${sumWeek}</strong></td><td class="num"><strong>${sumTotal}</strong></td></tr>
+    </table>
+    <p class="muted small">La semaine commence le lundi. Seuls les events acceptés et déjà terminés sont comptés.</p>`;
+}
+
+// ---- Équipe : liste des membres ; le gérant change les grades et valide les comptes
+function viewTeam() {
+  const g = isGerant(state.me);
+  const list = Object.values(state.profiles)
+    .sort((a, b) => (a.approved - b.approved) || (level(b) - level(a)) || a.username.localeCompare(b.username));
+
+  return `<h2>Équipe (${list.length})</h2>` + list.map(p => {
+    const isMe = p.id === state.me.id;
+    const controls = g && !isMe ? `<div class="controls">
+        <select data-act="setGrade" data-id="${p.id}">
+          ${Object.entries(GRADES).map(([k, v]) => `<option value="${k}" ${p.grade === k ? "selected" : ""}>${v.label}</option>`).join("")}
+        </select>
+        <label class="check"><input type="checkbox" data-act="setAdmin" data-id="${p.id}" ${p.is_admin ? "checked" : ""}> Badge admin</label>
+        <button class="btn ${p.approved ? "ghost" : "primary"}" data-act="toggleApproved" data-id="${p.id}">${p.approved ? "Désactiver" : "Valider le compte"}</button>
+      </div>` : "";
+    return `<div class="card member ${p.approved ? "" : "pending"}">
+        <div><strong>${esc(p.username)}</strong>${adminBadge(p)} ${gradeChip(p.grade)}
+          ${p.approved ? "" : `<span class="chip" style="--c:#9aa0c0">En attente de validation</span>`}
+          ${isMe ? `<span class="muted small">(toi)</span>` : ""}</div>
+        ${controls}
+      </div>`;
+  }).join("");
+}
+
+// ---- Connexion / inscription
+function viewAuth() {
+  const signup = state.authMode === "signup";
+  return `<div class="auth card">
+      <h1>🎪 Pôle Animation</h1>
+      <p class="muted">School RP · espace de l'équipe d'animation</p>
+      <form data-form="auth">
+        <label>Pseudo<input name="username" autocomplete="username" required></label>
+        <label>Mot de passe<input type="password" name="password" autocomplete="${signup ? "new-password" : "current-password"}" minlength="6" required></label>
+        <button class="btn primary">${signup ? "Créer mon compte" : "Se connecter"}</button>
+      </form>
+      <p class="muted center">${signup ? "Déjà un compte ?" : "Pas encore de compte ?"}
+        <a href="#" data-act="authMode" data-id="${signup ? "login" : "signup"}">${signup ? "Se connecter" : "Créer un compte"}</a></p>
+      ${signup ? `<p class="muted small center">Ton compte devra être validé par un gérant avant d'accéder au site.</p>` : ""}
+    </div>`;
+}
+
+const VIEWS = { planning: viewPlanning, week: viewWeek, requests: viewRequests, history: viewHistory, stats: viewStats, team: viewTeam };
+
+
+/* =====================================================================
+   6. LA PAGE COMPLÈTE
+   ===================================================================== */
+
+function render() {
+  const app = document.getElementById("app");
+
+  if (!state.session) { app.innerHTML = viewAuth(); return; }
+
+  if (!state.me) {
+    app.innerHTML = `<div class="auth card"><h1>Oups</h1>
+      <p>Impossible de charger ton profil. Vérifie que setup.sql a bien été exécuté dans Supabase.</p>
+      <button class="btn" data-act="refresh">Réessayer</button> <button class="btn ghost" data-act="logout">Déconnexion</button></div>`;
+    return;
+  }
+
+  if (!state.me.approved) {
+    app.innerHTML = `<div class="auth card"><h1>⏳ Compte en attente</h1>
+      <p>Ton compte <strong>${esc(state.me.username)}</strong> doit être validé par un gérant animation. Reviens un peu plus tard !</p>
+      <button class="btn primary" data-act="refresh">Vérifier</button> <button class="btn ghost" data-act="logout">Déconnexion</button></div>`;
+    return;
+  }
+
+  const me = state.me;
+  const counts = {
+    requests: isManager(me) ? state.events.filter(e => e.status === "pending").length : 0,
+    team: isGerant(me) ? Object.values(state.profiles).filter(p => !p.approved).length : 0,
+  };
+
+  app.innerHTML = `
+    <header>
+      <h1>🎪 Pôle Animation</h1>
+      <div class="me">${esc(me.username)}${adminBadge(me)} ${gradeChip(me.grade)}
+        <button class="btn ghost" data-act="refresh" title="Actualiser">↻</button>
+        <button class="btn ghost" data-act="logout">Déconnexion</button></div>
+    </header>
+    <nav>${TABS.map(t => `<button class="tab ${state.tab === t.id ? "on" : ""}" data-act="tab" data-id="${t.id}">${t.label}${counts[t.id] ? ` <span class="dot">${counts[t.id]}</span>` : ""}</button>`).join("")}</nav>
+    <main>${VIEWS[state.tab]()}</main>`;
+}
+
+
+/* =====================================================================
+   7. LES ACTIONS (boutons, formulaires)
+   ===================================================================== */
+
+// Envoie une modification à Supabase, affiche un message, puis recharge
+async function mutate(promise, okMsg) {
+  const { error } = await promise;
+  if (error) toast(error.message, true);
+  else if (okMsg) toast(okMsg);
+  await refresh();
+}
+
+const actions = {
+  // navigation
+  tab:        async (id) => { state.tab = id; await refresh(); },
+  weekPrev:   () => { state.weekOffset--; render(); },
+  weekNext:   () => { state.weekOffset++; render(); },
+  weekToday:  () => { state.weekOffset = 0; render(); },
+  histFilter: (id, el) => { state.histFilter = el.value; render(); },
+  refresh:    () => refresh(),
+  authMode:   (id) => { state.authMode = id; render(); },
+  logout:     async () => { await db.auth.signOut(); Object.assign(state, { session: null, me: null, profiles: {}, events: [] }); render(); },
+
+  // events : responsable / gérant
+  accept: (id) => mutate(db.from("events").update({ status: "accepted", reviewed_by: state.me.id }).eq("id", id), "Event accepté ✅"),
+  refuse: (id) => mutate(db.from("events").update({ status: "refused",  reviewed_by: state.me.id }).eq("id", id), "Demande refusée"),
+  delete: (id) => confirm("Supprimer cet event ?") && mutate(db.from("events").delete().eq("id", id), "Event supprimé"),
+
+  // serveur privé : animateur senior et plus (vérifié aussi côté Supabase)
+  takeServer: (id) => mutate(db.rpc("take_server", { p_event: id, p_take: true }),  "Tu ouvres le serveur 🖥"),
+  dropServer: (id) => mutate(db.rpc("take_server", { p_event: id, p_take: false }), "Serveur libéré"),
+
+  // gears : responsable / gérant
+  takeGears: (id) => mutate(db.rpc("take_gears", { p_event: id, p_take: true }),  "Tu fournis les gears ⚙️"),
+  dropGears: (id) => mutate(db.rpc("take_gears", { p_event: id, p_take: false }), "Gears retirés"),
+
+  // équipe : gérant
+  setGrade:       (id, el) => mutate(db.from("profiles").update({ grade: el.value }).eq("id", id), "Grade modifié"),
+  setAdmin:       (id, el) => mutate(db.from("profiles").update({ is_admin: el.checked }).eq("id", id), "Badge modifié"),
+  toggleApproved: (id) => mutate(db.from("profiles").update({ approved: !state.profiles[id].approved }).eq("id", id), "Compte mis à jour"),
+};
+
+// Clic sur un bouton / lien avec data-act
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act]");
+  if (!el || el.tagName === "SELECT" || el.tagName === "INPUT") return;
+  e.preventDefault();
+  actions[el.dataset.act]?.(el.dataset.id, el);
+});
+
+// Changement d'une liste déroulante / case à cocher avec data-act
+document.addEventListener("change", e => {
+  const el = e.target.closest("[data-act]");
+  if (!el || (el.tagName !== "SELECT" && el.tagName !== "INPUT")) return;
+  actions[el.dataset.act]?.(el.dataset.id, el);
+});
+
+// Envoi d'un formulaire
+document.addEventListener("submit", e => {
+  const form = e.target.closest("[data-form]");
+  if (!form) return;
+  e.preventDefault();
+  if (form.dataset.form === "auth") submitAuth(form);
+  if (form.dataset.form === "request") submitRequest(form);
+});
+
+// --- Connexion / inscription
+function authError(msg) {
+  if (/invalid login/i.test(msg)) return "Pseudo ou mot de passe incorrect.";
+  if (/already registered/i.test(msg)) return "Ce pseudo est déjà pris.";
+  if (/password/i.test(msg) && /6/.test(msg)) return "Mot de passe trop court (6 caractères minimum).";
+  return msg;
+}
+
+async function submitAuth(form) {
+  const f = new FormData(form);
+  const username = String(f.get("username")).trim().toLowerCase();
+  const password = String(f.get("password"));
+  if (!/^[a-z0-9_.-]{3,20}$/.test(username))
+    return toast("Pseudo : 3 à 20 caractères (lettres, chiffres, _ . -)", true);
+
+  const email = `${username}@${EMAIL_DOMAIN}`;
+  const res = state.authMode === "signup"
+    ? await db.auth.signUp({ email, password })
+    : await db.auth.signInWithPassword({ email, password });
+
+  if (res.error) return toast(authError(res.error.message), true);
+  if (!res.data.session)
+    return toast("Compte créé, mais Supabase attend une confirmation par mail : désactive « Confirm email » dans Supabase.", true);
+
+  state.session = res.data.session;
+  await refresh();
+}
+
+// --- Demande d'event (ou création directe pour un responsable / gérant)
+async function submitRequest(form) {
+  const f = new FormData(form);
+  const date = new Date(f.get("date"));
+  if (isNaN(date) || date < new Date()) return toast("Choisis une date dans le futur.", true);
+
+  const mgr = isManager(state.me);
+  const { error } = await db.from("events").insert({
+    title: String(f.get("title")).trim(),
+    description: String(f.get("description")).trim() || null,
+    gear_note: String(f.get("gears")).trim() || null,
+    event_date: date.toISOString(),
+    requested_by: state.me.id,
+    status: mgr ? "accepted" : "pending",
+    reviewed_by: mgr ? state.me.id : null,
+  });
+  if (error) return toast(error.message, true);
+
+  toast(mgr ? "Event ajouté au planning ✅" : "Demande envoyée, un responsable va la valider ✅");
+  if (mgr) state.tab = "planning";
+  await refresh();
+}
+
+
+/* =====================================================================
+   8. DÉMARRAGE
+   ===================================================================== */
+
+(async function start() {
+  const app = document.getElementById("app");
+
+  if (SUPABASE_URL.startsWith("COLLE")) {
+    app.innerHTML = `<div class="auth card"><h1>Configuration requise</h1>
+      <p>Ouvre <code>index.html</code> et remplace <code>SUPABASE_URL</code> et <code>SUPABASE_KEY</code> tout en haut du script (section 1).</p></div>`;
+    return;
+  }
+
+  db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const { data } = await db.auth.getSession();
+  state.session = data.session;
+  if (state.session) await refresh(); else render();
+})();
+</script>
+</body>
+</html>
