@@ -73,6 +73,12 @@
   .check { display: flex; align-items: center; gap: 8px; margin: 0; }
   .check input { width: auto; margin: 0; }
   .filter { margin-bottom: 10px; max-width: 280px; }
+  code { background: var(--panel2); padding: 2px 8px; border-radius: 6px; font-size: .95rem; letter-spacing: .5px; }
+  .pwrow { display: flex; gap: 8px; align-items: center; }
+  .pwrow input { flex: 1; min-width: 0; margin-top: 0; }
+  .lbl { display: block; margin-top: 10px; font-size: .9rem; color: var(--muted); }
+  .staffbox { max-height: 170px; overflow-y: auto; background: var(--panel2); border-radius: 10px; padding: 6px 10px; margin: 4px 0 6px; }
+  .staffbox label.check { margin: 6px 0; color: var(--text); }
 
   .auth { max-width: 380px; margin: 60px auto; }
   .weeknav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 14px 0 4px; }
@@ -189,6 +195,39 @@ function toast(msg, bad) {
 
 const empty = msg => `<p class="empty">${msg}</p>`;
 
+// Copie un texte dans le presse-papier
+async function copyText(text) {
+  if (!text) return toast("Rien à copier.", true);
+  try {
+    await navigator.clipboard.writeText(text);
+    return toast("Mot de passe copié 📋");
+  } catch (e) { /* on essaie la méthode de secours juste en dessous */ }
+  const t = document.createElement("textarea");
+  t.value = text;
+  document.body.appendChild(t);
+  t.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) {}
+  t.remove();
+  toast(ok ? "Mot de passe copié 📋" : "Impossible de copier : sélectionne-le à la main.", !ok);
+}
+
+// "Staff présent" d'un event : comptes du site + noms ajoutés à la main
+function staffLine(ev) {
+  const all = (ev.staff_ids || []).map(who).concat((ev.staff_names || []).map(n => `<strong>${esc(n)}</strong>`));
+  return all.length ? `<div class="row">👥 Staff présent : ${all.join(", ")}</div>` : "";
+}
+
+// Liste à cocher des comptes du site + champ pour des noms manuels (formulaire de demande)
+function staffPicker() {
+  const accounts = Object.values(state.profiles).filter(p => p.approved);
+  return `<span class="lbl">Staff présent</span>
+    <div class="staffbox">${accounts.map(p =>
+      `<label class="check"><input type="checkbox" name="staff" value="${p.id}"> ${esc(p.username)} ${gradeChip(p.grade)}</label>`).join("")}</div>
+    <label>Autres noms (pas de compte sur le site, séparés par une virgule)
+      <input name="staff_names" maxlength="200" placeholder="Ex : Léo, Marie"></label>`;
+}
+
 // Petits morceaux d'affichage réutilisés partout
 const adminBadge = p => (p && p.is_admin ? ` <span class="admin">🛡 Admin serveur</span>` : "");
 const gradeChip  = g => (GRADES[g] ? `<span class="chip" style="--c:${GRADES[g].color}">${GRADES[g].label}</span>` : "");
@@ -247,6 +286,9 @@ function eventCard(ev, grouped) {
 
   if (ev.description) h += `<p>${esc(ev.description)}</p>`;
   h += `<div class="row">🎭 Animé par ${who(ev.requested_by)} ${owner ? gradeChip(owner.grade) : ""}</div>`;
+  if (ev.server_password && !done)
+    h += `<div class="row">🔑 Mot de passe : <code>${esc(ev.server_password)}</code> <button class="btn ghost" data-act="copyPw" data-id="${ev.id}">📋 Copier</button></div>`;
+  h += staffLine(ev);
 
   // --- Serveur privé : qui l'ouvre ? (seulement pour les events acceptés)
   if (ev.status === "accepted") {
@@ -355,9 +397,13 @@ function viewRequests() {
   let html = `<form data-form="request" class="card">
       <h3>${mgr ? "Créer un event (ajouté directement au planning)" : "Demander un event"}</h3>
       <label>Nom de l'event<input name="title" required maxlength="80"></label>
+      <label>Mot de passe du serveur (8 caractères max, optionnel)
+        <div class="pwrow"><input name="password" maxlength="8" autocomplete="off">
+          <button type="button" class="btn" data-act="copyFormPw">📋 Copier</button></div></label>
       <label>Date et heure<input type="datetime-local" name="date" required value="${defDate}"></label>
       <label>Description (optionnel)<textarea name="description" maxlength="500"></textarea></label>
       <label>Gears demandés (optionnel)<input name="gears" maxlength="120" placeholder="Si tu as besoin de gears, écris lesquels ici"></label>
+      ${staffPicker()}
       <button class="btn primary">${mgr ? "Ajouter au planning" : "Envoyer la demande"}</button>
     </form>`;
 
@@ -417,21 +463,35 @@ function viewStats() {
     <p class="muted small">La semaine commence le lundi. Seuls les events acceptés et déjà terminés sont comptés.</p>`;
 }
 
-// ---- Équipe : liste des membres ; le gérant change les grades et valide les comptes
+// ---- Équipe : le gérant gère tout ; le responsable valide les comptes (grade max : animateur senior)
 function viewTeam() {
-  const g = isGerant(state.me);
+  const me = state.me, g = isGerant(me), mgr = isManager(me);
   const list = Object.values(state.profiles)
     .sort((a, b) => (a.approved - b.approved) || (level(b) - level(a)) || a.username.localeCompare(b.username));
 
-  return `<h2>Équipe (${list.length})</h2>` + list.map(p => {
-    const isMe = p.id === state.me.id;
-    const controls = g && !isMe ? `<div class="controls">
-        <select data-act="setGrade" data-id="${p.id}">
-          ${Object.entries(GRADES).map(([k, v]) => `<option value="${k}" ${p.grade === k ? "selected" : ""}>${v.label}</option>`).join("")}
-        </select>
+  // Liste de grades proposés, jusqu'au niveau maxLevel
+  const gradeOptions = (p, maxLevel) => Object.entries(GRADES)
+    .filter(([k, v]) => v.level <= maxLevel)
+    .map(([k, v]) => `<option value="${k}" ${p.grade === k ? "selected" : ""}>${v.label}</option>`).join("");
+
+  const hint = !g && mgr
+    ? `<p class="muted small">Tu peux valider les comptes et leur donner au maximum le grade « ${GRADES.animateur_senior.label} ».</p>` : "";
+
+  return `<h2>Équipe (${list.length})</h2>${hint}` + list.map(p => {
+    const isMe = p.id === me.id;
+    let controls = "";
+    if (!isMe && g) {                         // gérant : tout
+      controls = `<div class="controls">
+        <select data-act="setGrade" data-id="${p.id}">${gradeOptions(p, 4)}</select>
         <label class="check"><input type="checkbox" data-act="setAdmin" data-id="${p.id}" ${p.is_admin ? "checked" : ""}> Badge admin</label>
         <button class="btn ${p.approved ? "ghost" : "primary"}" data-act="toggleApproved" data-id="${p.id}">${p.approved ? "Désactiver" : "Valider le compte"}</button>
-      </div>` : "";
+      </div>`;
+    } else if (!isMe && mgr && level(p) <= 2) {   // responsable : animateur / animateur senior seulement
+      controls = `<div class="controls">
+        <select data-act="setGrade" data-id="${p.id}">${gradeOptions(p, 2)}</select>
+        ${p.approved ? "" : `<button class="btn primary" data-act="toggleApproved" data-id="${p.id}">Valider le compte</button>`}
+      </div>`;
+    }
     return `<div class="card member ${p.approved ? "" : "pending"}">
         <div><strong>${esc(p.username)}</strong>${adminBadge(p)} ${gradeChip(p.grade)}
           ${p.approved ? "" : `<span class="chip" style="--c:#9aa0c0">En attente de validation</span>`}
@@ -487,7 +547,7 @@ function render() {
   const me = state.me;
   const counts = {
     requests: isManager(me) ? state.events.filter(e => e.status === "pending").length : 0,
-    team: isGerant(me) ? Object.values(state.profiles).filter(p => !p.approved).length : 0,
+    team: isManager(me) ? Object.values(state.profiles).filter(p => !p.approved).length : 0,
   };
 
   app.innerHTML = `
@@ -538,10 +598,14 @@ const actions = {
   takeGears: (id) => mutate(db.rpc("take_gears", { p_event: id, p_take: true }),  "Tu fournis les gears ⚙️"),
   dropGears: (id) => mutate(db.rpc("take_gears", { p_event: id, p_take: false }), "Gears retirés"),
 
-  // équipe : gérant
-  setGrade:       (id, el) => mutate(db.from("profiles").update({ grade: el.value }).eq("id", id), "Grade modifié"),
+  // mot de passe : copier dans le presse-papier
+  copyPw:     (id) => copyText(state.events.find(e => e.id === id)?.server_password),
+  copyFormPw: () => copyText(document.querySelector("form[data-form=request] [name=password]")?.value.trim()),
+
+  // équipe : gérant, et responsable (animateur / animateur senior seulement, vérifié aussi côté Supabase)
+  setGrade:       (id, el) => mutate(db.rpc("set_member", { p_id: id, p_grade: el.value }), "Grade modifié"),
   setAdmin:       (id, el) => mutate(db.from("profiles").update({ is_admin: el.checked }).eq("id", id), "Badge modifié"),
-  toggleApproved: (id) => mutate(db.from("profiles").update({ approved: !state.profiles[id].approved }).eq("id", id), "Compte mis à jour"),
+  toggleApproved: (id) => mutate(db.rpc("set_member", { p_id: id, p_approved: !state.profiles[id].approved }), "Compte mis à jour"),
 };
 
 // Clic sur un bouton / lien avec data-act
@@ -607,6 +671,9 @@ async function submitRequest(form) {
     title: String(f.get("title")).trim(),
     description: String(f.get("description")).trim() || null,
     gear_note: String(f.get("gears")).trim() || null,
+    server_password: String(f.get("password") || "").trim().slice(0, 8) || null,
+    staff_ids: f.getAll("staff").map(String),
+    staff_names: String(f.get("staff_names") || "").split(",").map(n => n.trim().slice(0, 30)).filter(Boolean).slice(0, 20),
     event_date: date.toISOString(),
     requested_by: state.me.id,
     status: mgr ? "accepted" : "pending",
