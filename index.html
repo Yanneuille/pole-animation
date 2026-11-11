@@ -77,8 +77,9 @@
   .pwrow { display: flex; gap: 8px; align-items: center; }
   .pwrow input { flex: 1; min-width: 0; margin-top: 0; }
   .lbl { display: block; margin-top: 10px; font-size: .9rem; color: var(--muted); }
-  .staffbox { max-height: 170px; overflow-y: auto; background: var(--panel2); border-radius: 10px; padding: 6px 10px; margin: 4px 0 6px; }
-  .staffbox label.check { margin: 6px 0; color: var(--text); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .staffchip { font-size: .85rem; padding: 3px 6px 3px 10px; }
+  .staffchip .x { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 3px; font-size: .85rem; }
 
   .auth { max-width: 380px; margin: 60px auto; }
   .weeknav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 14px 0 4px; }
@@ -218,15 +219,20 @@ function staffLine(ev) {
   return all.length ? `<div class="row">👥 Staff présent : ${all.join(", ")}</div>` : "";
 }
 
-// Liste à cocher des comptes du site + champ pour des noms manuels (formulaire de demande)
+// Liste déroulante des comptes du site + champ pour des noms manuels (formulaire de demande)
+// Chaque membre choisi devient une pastille (avec ✕ pour le retirer) qui contient un champ caché "staff".
 function staffPicker() {
   const accounts = Object.values(state.profiles).filter(p => p.approved);
   return `<span class="lbl">Staff présent</span>
-    <div class="staffbox">${accounts.map(p =>
-      `<label class="check"><input type="checkbox" name="staff" value="${p.id}"> ${esc(p.username)} ${gradeChip(p.grade)}</label>`).join("")}</div>
+    <select data-act="addStaff">
+      <option value="">➕ Ajouter un membre du site…</option>
+      ${accounts.map(p => `<option value="${p.id}">${esc(p.username)} · ${GRADES[p.grade] ? GRADES[p.grade].label : ""}</option>`).join("")}
+    </select>
+    <div id="staffChips" class="chips"></div>
     <label>Autres noms (pas de compte sur le site, séparés par une virgule)
       <input name="staff_names" maxlength="200" placeholder="Ex : Léo, Marie"></label>`;
 }
+
 
 // Petits morceaux d'affichage réutilisés partout
 const adminBadge = p => (p && p.is_admin ? ` <span class="admin">🛡 Admin serveur</span>` : "");
@@ -597,6 +603,26 @@ const actions = {
   // gears : responsable / gérant
   takeGears: (id) => mutate(db.rpc("take_gears", { p_event: id, p_take: true }),  "Tu fournis les gears ⚙️"),
   dropGears: (id) => mutate(db.rpc("take_gears", { p_event: id, p_take: false }), "Gears retirés"),
+
+  // staff présent : choisir un membre dans la liste déroulante / le retirer
+  addStaff: (_, el) => {
+    const id = el.value;                       // le membre choisi dans la liste
+    if (!id || !state.profiles[id]) return;
+    if (document.querySelector(`#staffChips input[value="${id}"]`)) { el.value = ""; return; }   // déjà ajouté
+    const p = state.profiles[id];
+    const color = GRADES[p.grade] ? GRADES[p.grade].color : "#9aa0c0";
+    document.getElementById("staffChips").insertAdjacentHTML("beforeend",
+      `<span class="chip staffchip" style="--c:${color}">${esc(p.username)}
+        <button type="button" class="x" data-act="removeStaff" data-id="${id}" title="Retirer">✕</button>
+        <input type="hidden" name="staff" value="${id}"></span>`);
+    el.querySelector(`option[value="${id}"]`).disabled = true;   // pas de doublon
+    el.value = "";                                                // la liste revient sur "Ajouter…"
+  },
+  removeStaff: (id, el) => {
+    el.closest(".staffchip")?.remove();
+    const opt = document.querySelector(`select[data-act=addStaff] option[value="${id}"]`);
+    if (opt) opt.disabled = false;
+  },
 
   // mot de passe : copier dans le presse-papier
   copyPw:     (id) => copyText(state.events.find(e => e.id === id)?.server_password),
