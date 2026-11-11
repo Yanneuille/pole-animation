@@ -499,11 +499,13 @@ function viewTeam() {
         <select data-act="setGrade" data-id="${p.id}">${gradeOptions(p, 4)}</select>
         <label class="check"><input type="checkbox" data-act="setAdmin" data-id="${p.id}" ${p.is_admin ? "checked" : ""}> Badge admin</label>
         <button class="btn ${p.approved ? "ghost" : "primary"}" data-act="toggleApproved" data-id="${p.id}">${p.approved ? "Désactiver" : "Valider le compte"}</button>
+        ${p.approved ? "" : `<button class="btn bad" data-act="refuseMember" data-id="${p.id}">✖ Refuser</button>`}
       </div>`;
     } else if (!isMe && mgr && level(p) <= 2) {   // responsable : animateur / animateur senior seulement
       controls = `<div class="controls">
         <select data-act="setGrade" data-id="${p.id}">${gradeOptions(p, 2)}</select>
         ${p.approved ? "" : `<button class="btn primary" data-act="toggleApproved" data-id="${p.id}">Valider le compte</button>`}
+        ${p.approved ? "" : `<button class="btn bad" data-act="refuseMember" data-id="${p.id}">✖ Refuser</button>`}
       </div>`;
     }
     return `<div class="card member ${p.approved ? "" : "pending"}">
@@ -642,6 +644,8 @@ const actions = {
   // équipe : gérant, et responsable (animateur / animateur senior seulement, vérifié aussi côté Supabase)
   setGrade:       (id, el) => mutate(db.rpc("set_member", { p_id: id, p_grade: el.value }), "Grade modifié"),
   setAdmin:       (id, el) => mutate(db.from("profiles").update({ is_admin: el.checked }).eq("id", id), "Badge modifié"),
+  refuseMember:   (id) => confirm(`Refuser la demande de ${state.profiles[id]?.username || "ce membre"} ? Son compte sera supprimé (il pourra refaire une demande).`)
+                          && mutate(db.rpc("refuse_member", { p_id: id }), "Demande refusée"),
   toggleApproved: (id) => mutate(db.rpc("set_member", { p_id: id, p_approved: !state.profiles[id].approved }), "Compte mis à jour"),
 };
 
