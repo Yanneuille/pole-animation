@@ -130,6 +130,7 @@ const GRADES = {
   responsable:      { label: "Responsable",      level: 3, color: "#f59e0b" },
   animateur_senior: { label: "Animateur senior", level: 2, color: "#3b82f6" },
   animateur:        { label: "Animateur",        level: 1, color: "#22c55e" },
+  invite:           { label: "Invité",           level: 0, color: "#9aa0c0" },  // lecture seule
 };
 
 // Qui a le droit de faire quoi (basé sur le level ci-dessus).
@@ -138,12 +139,13 @@ const level          = p => (p && GRADES[p.grade] ? GRADES[p.grade].level : 0);
 const isManager      = p => level(p) >= 3;   // responsable + gérant : acceptent les demandes, fournissent les gears
 const canOpenServer  = p => level(p) >= 2;   // animateur senior et plus : ouvrent les serveurs privés
 const isGerant       = p => level(p) === 4;  // gérant : gère l'équipe
+const isGuest        = p => !!p && p.grade === "invite";   // invité : peut seulement regarder
 
 // Les onglets du site (change l'ordre ou les noms ici)
 const TABS = [
   { id: "planning", label: "📅 Planning" },
   { id: "week",     label: "🗓 Semaine" },
-  { id: "requests", label: "📝 Demandes" },
+  { id: "requests", label: "📝 Demandes", noGuest: true },   // noGuest : caché pour les invités
   { id: "history",  label: "✅ Historique" },
   { id: "stats",    label: "📊 Stats" },
   { id: "team",     label: "👥 Équipe" },
@@ -160,6 +162,7 @@ const state = {
   me: null,            // mon profil
   profiles: {},        // tous les profils, par id
   events: [],          // tous les events
+  passwords: {},       // mots de passe des serveurs (la base ne les donne pas aux invités)
   tab: "planning",     // onglet affiché
   weekOffset: 0,       // 0 = cette semaine, -1 = la précédente...
   authMode: "login",   // "login" ou "signup"
@@ -222,7 +225,7 @@ function staffLine(ev) {
 // Liste déroulante des comptes du site + champ pour des noms manuels (formulaire de demande)
 // Chaque membre choisi devient une pastille (avec ✕ pour le retirer) qui contient un champ caché "staff".
 function staffPicker() {
-  const accounts = Object.values(state.profiles).filter(p => p.approved);
+  const accounts = Object.values(state.profiles).filter(p => p.approved && !isGuest(p));
   return `<span class="lbl">Staff présent</span>
     <select data-act="addStaff">
       <option value="">➕ Ajouter un membre du site…</option>
@@ -255,14 +258,18 @@ async function loadAll() {
   state.me = me;
   if (!me.approved) return;               // compte pas encore validé : on s'arrête là
 
-  const [p, e] = await Promise.all([
+  const [p, e, pw] = await Promise.all([
     db.from("profiles").select("*").order("username"),
     db.from("events").select("*").order("event_date"),
+    db.from("event_passwords").select("*"),
   ]);
   if (p.error) throw p.error;
   if (e.error) throw e.error;
   state.profiles = Object.fromEntries(p.data.map(x => [x.id, x]));
   state.events = e.data;
+  // Si setup.sql n'a pas encore été relancé, on continue sans les mots de passe
+  if (pw.error) console.warn("Mots de passe indisponibles :", pw.error.message);
+  state.passwords = pw.error ? {} : Object.fromEntries(pw.data.map(x => [x.event_id, x.password]));
 }
 
 async function refresh() {
@@ -292,8 +299,8 @@ function eventCard(ev, grouped) {
 
   if (ev.description) h += `<p>${esc(ev.description)}</p>`;
   h += `<div class="row">🎭 Animé par ${who(ev.requested_by)} ${owner ? gradeChip(owner.grade) : ""}</div>`;
-  if (ev.server_password && !done)
-    h += `<div class="row">🔑 Mot de passe : <code>${esc(ev.server_password)}</code> <button class="btn ghost" data-act="copyPw" data-id="${ev.id}">📋 Copier</button></div>`;
+  if (state.passwords[ev.id] && !done)
+    h += `<div class="row">🔑 Mot de passe : <code>${esc(state.passwords[ev.id])}</code> <button class="btn ghost" data-act="copyPw" data-id="${ev.id}">📋 Copier</button></div>`;
   h += staffLine(ev);
 
   // --- Serveur privé : qui l'ouvre ? (seulement pour les events acceptés)
@@ -473,6 +480,7 @@ function viewStats() {
 function viewTeam() {
   const me = state.me, g = isGerant(me), mgr = isManager(me);
   const list = Object.values(state.profiles)
+    .filter(p => !isGuest(p) || mgr || p.id === me.id)     // les invités ne sont visibles que des responsables / gérants
     .sort((a, b) => (a.approved - b.approved) || (level(b) - level(a)) || a.username.localeCompare(b.username));
 
   // Liste de grades proposés, jusqu'au niveau maxLevel
@@ -556,6 +564,9 @@ function render() {
     team: isManager(me) ? Object.values(state.profiles).filter(p => !p.approved).length : 0,
   };
 
+  const tabs = TABS.filter(t => !(t.noGuest && isGuest(me)));
+  if (!tabs.some(t => t.id === state.tab)) state.tab = tabs[0].id;
+
   app.innerHTML = `
     <header>
       <h1>🎪 Pôle Animation</h1>
@@ -563,7 +574,7 @@ function render() {
         <button class="btn ghost" data-act="refresh" title="Actualiser">↻</button>
         <button class="btn ghost" data-act="logout">Déconnexion</button></div>
     </header>
-    <nav>${TABS.map(t => `<button class="tab ${state.tab === t.id ? "on" : ""}" data-act="tab" data-id="${t.id}">${t.label}${counts[t.id] ? ` <span class="dot">${counts[t.id]}</span>` : ""}</button>`).join("")}</nav>
+    <nav>${tabs.map(t => `<button class="tab ${state.tab === t.id ? "on" : ""}" data-act="tab" data-id="${t.id}">${t.label}${counts[t.id] ? ` <span class="dot">${counts[t.id]}</span>` : ""}</button>`).join("")}</nav>
     <main>${VIEWS[state.tab]()}</main>`;
 }
 
@@ -625,7 +636,7 @@ const actions = {
   },
 
   // mot de passe : copier dans le presse-papier
-  copyPw:     (id) => copyText(state.events.find(e => e.id === id)?.server_password),
+  copyPw:     (id) => copyText(state.passwords[id]),
   copyFormPw: () => copyText(document.querySelector("form[data-form=request] [name=password]")?.value.trim()),
 
   // équipe : gérant, et responsable (animateur / animateur senior seulement, vérifié aussi côté Supabase)
@@ -693,21 +704,26 @@ async function submitRequest(form) {
   if (isNaN(date) || date < new Date()) return toast("Choisis une date dans le futur.", true);
 
   const mgr = isManager(state.me);
-  const { error } = await db.from("events").insert({
+  const password = String(f.get("password") || "").trim().slice(0, 8);
+  const { data: created, error } = await db.from("events").insert({
     title: String(f.get("title")).trim(),
     description: String(f.get("description")).trim() || null,
     gear_note: String(f.get("gears")).trim() || null,
-    server_password: String(f.get("password") || "").trim().slice(0, 8) || null,
     staff_ids: f.getAll("staff").map(String),
     staff_names: String(f.get("staff_names") || "").split(",").map(n => n.trim().slice(0, 30)).filter(Boolean).slice(0, 20),
     event_date: date.toISOString(),
     requested_by: state.me.id,
     status: mgr ? "accepted" : "pending",
     reviewed_by: mgr ? state.me.id : null,
-  });
+  }).select("id").single();
   if (error) return toast(error.message, true);
 
-  toast(mgr ? "Event ajouté au planning ✅" : "Demande envoyée, un responsable va la valider ✅");
+  let pwFailed = false;
+  if (password) {
+    const r = await db.from("event_passwords").insert({ event_id: created.id, password });
+    if (r.error) { pwFailed = true; toast("Event créé, mais le mot de passe n'a pas été enregistré : " + r.error.message, true); }
+  }
+  if (!pwFailed) toast(mgr ? "Event ajouté au planning ✅" : "Demande envoyée, un responsable va la valider ✅");
   if (mgr) state.tab = "planning";
   await refresh();
 }
