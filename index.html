@@ -80,6 +80,15 @@
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
   .staffchip { font-size: .85rem; padding: 3px 6px 3px 10px; }
   .staffchip .x { background: none; border: 0; color: inherit; cursor: pointer; padding: 0 3px; font-size: .85rem; }
+  .banner { padding: 10px 14px; border-radius: var(--radius); margin: 12px 0 0; border: 1px solid var(--warn);
+            background: color-mix(in srgb, var(--warn) 16%, transparent); font-size: .93rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 10px 0; }
+  .stat { background: var(--panel); border-radius: var(--radius); padding: 12px 14px; }
+  .stat b { display: block; font-size: 1.45rem; }
+  .stat span { color: var(--muted); font-size: .85rem; }
+  .bar { height: 8px; background: var(--panel2); border-radius: 99px; overflow: hidden; margin: 8px 0; }
+  .bar > i { display: block; height: 100%; background: var(--accent); }
+  textarea.ann { min-height: 150px; font-size: .9rem; }
 
   .auth { max-width: 380px; margin: 60px auto; }
   .weeknav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 14px 0 4px; }
@@ -123,6 +132,10 @@ const EMAIL_DOMAIN = "animation-rp.com";
 // Un event est considéré "fait" une fois ce nombre de minutes écoulé après son début
 const DUREE_EVENT_MIN = 60;
 
+// Les alertes de quota (bandeau pour l'animateur, pastille pour les responsables)
+// n'apparaissent qu'à partir de ce jour de la semaine : 1 = lundi … 4 = jeudi … 7 = dimanche
+const ALERT_FROM_DAY = 4;
+
 // Les grades. La clé (gerant, responsable...) doit rester identique à setup.sql.
 // level = niveau d'autorité (4 = le plus haut). Tu peux changer label et color.
 const GRADES = {
@@ -145,11 +158,29 @@ const isGuest        = p => !!p && p.grade === "invite";   // invité : peut seu
 const TABS = [
   { id: "planning", label: "📅 Planning" },
   { id: "week",     label: "🗓 Semaine" },
-  { id: "requests", label: "📝 Demandes", noGuest: true },   // noGuest : caché pour les invités
+  { id: "requests", label: "📝 Demandes",  noGuest: true },       // noGuest : caché pour les invités
+  { id: "announces", label: "📢 Annonces", noGuest: true },
   { id: "history",  label: "✅ Historique" },
   { id: "stats",    label: "📊 Stats" },
+  { id: "quotas",   label: "🔔 Quotas",    managerOnly: true },   // managerOnly : responsables et gérants
   { id: "team",     label: "👥 Équipe" },
+  { id: "profile",  label: "👤 Mon profil", noGuest: true },
 ];
+
+// Le modèle des annonces (texte à copier-coller, ex. sur Discord).
+// Modifie les lignes ci-dessous pour changer la forme : **gras**, emojis, ordre...
+function buildAnnouncement(ev) {
+  return [
+    `🎉 **${ev.title}** 🎉`,
+    ``,
+    `📅 **Date :** ${cap(fmtDay(ev.event_date))}`,
+    `🕒 **Heure :** ${fmtTime(ev.event_date)}`,
+    `🔑 **Mot de passe :** ${state.passwords[ev.id] || "à définir"}`,
+    ``,
+    `📝 **Description :** ${ev.description || "à définir"}`,
+    `🏆 **Récompense :** ${ev.reward || "à définir"}`,
+  ].join("\n");
+}
 
 
 /* =====================================================================
@@ -163,6 +194,8 @@ const state = {
   profiles: {},        // tous les profils, par id
   events: [],          // tous les events
   passwords: {},       // mots de passe des serveurs (la base ne les donne pas aux invités)
+  quota: 2,            // quota hebdomadaire par défaut (modifiable par le gérant)
+  profileId: null,     // profil affiché (null = le mien)
   tab: "planning",     // onglet affiché
   weekOffset: 0,       // 0 = cette semaine, -1 = la précédente...
   authMode: "login",   // "login" ou "signup"
@@ -199,12 +232,13 @@ function toast(msg, bad) {
 
 const empty = msg => `<p class="empty">${msg}</p>`;
 
-// Copie un texte dans le presse-papier
-async function copyText(text) {
+// Copie un texte dans le presse-papier (okMsg = message affiché quand c'est fait)
+async function copyText(text, okMsg) {
+  const msg = okMsg || "Mot de passe copié 📋";
   if (!text) return toast("Rien à copier.", true);
   try {
     await navigator.clipboard.writeText(text);
-    return toast("Mot de passe copié 📋");
+    return toast(msg);
   } catch (e) { /* on essaie la méthode de secours juste en dessous */ }
   const t = document.createElement("textarea");
   t.value = text;
@@ -213,7 +247,7 @@ async function copyText(text) {
   let ok = false;
   try { ok = document.execCommand("copy"); } catch (e) {}
   t.remove();
-  toast(ok ? "Mot de passe copié 📋" : "Impossible de copier : sélectionne-le à la main.", !ok);
+  toast(ok ? msg : "Impossible de copier : sélectionne le texte à la main.", !ok);
 }
 
 // "Staff présent" d'un event : comptes du site + noms ajoutés à la main
@@ -258,10 +292,11 @@ async function loadAll() {
   state.me = me;
   if (!me.approved) return;               // compte pas encore validé : on s'arrête là
 
-  const [p, e, pw] = await Promise.all([
+  const [p, e, pw, st] = await Promise.all([
     db.from("profiles").select("*").order("username"),
     db.from("events").select("*").order("event_date"),
     db.from("event_passwords").select("*"),
+    db.from("app_settings").select("*"),
   ]);
   if (p.error) throw p.error;
   if (e.error) throw e.error;
@@ -270,6 +305,8 @@ async function loadAll() {
   // Si setup.sql n'a pas encore été relancé, on continue sans les mots de passe
   if (pw.error) console.warn("Mots de passe indisponibles :", pw.error.message);
   state.passwords = pw.error ? {} : Object.fromEntries(pw.data.map(x => [x.event_id, x.password]));
+  const q = (!st.error && st.data && st.data[0]) ? st.data[0].weekly_quota : undefined;
+  state.quota = typeof q === "number" ? q : 2;    // 2 par défaut si setup.sql n'a pas été relancé
 }
 
 async function refresh() {
@@ -298,6 +335,7 @@ function eventCard(ev, grouped) {
   h += `<div class="card-head"><div><h3>${esc(ev.title)}</h3><div class="muted">${when}</div></div>${status}</div>`;
 
   if (ev.description) h += `<p>${esc(ev.description)}</p>`;
+  if (ev.reward) h += `<div class="row">🏆 Récompense : ${esc(ev.reward)}</div>`;
   h += `<div class="row">🎭 Animé par ${who(ev.requested_by)} ${owner ? gradeChip(owner.grade) : ""}</div>`;
   if (state.passwords[ev.id] && !done)
     h += `<div class="row">🔑 Mot de passe : <code>${esc(state.passwords[ev.id])}</code> <button class="btn ghost" data-act="copyPw" data-id="${ev.id}">📋 Copier</button></div>`;
@@ -415,6 +453,7 @@ function viewRequests() {
           <button type="button" class="btn" data-act="copyFormPw">📋 Copier</button></div></label>
       <label>Date et heure<input type="datetime-local" name="date" required value="${defDate}"></label>
       <label>Description (optionnel)<textarea name="description" maxlength="500"></textarea></label>
+      <label>Récompense (optionnel)<input name="reward" maxlength="200" placeholder="Ex : 500 coins, un rôle spécial…"></label>
       <label>Gears demandés (optionnel)<input name="gears" maxlength="120" placeholder="Si tu as besoin de gears, écris lesquels ici"></label>
       ${staffPicker()}
       <button class="btn primary">${mgr ? "Ajouter au planning" : "Envoyer la demande"}</button>
@@ -469,7 +508,7 @@ function viewStats() {
   return `<h2>Stats des animateurs</h2>
     <table>
       <tr><th>Animateur</th><th>Grade</th><th class="num">Cette semaine</th><th class="num">Total</th></tr>
-      ${rows.map(r => `<tr><td>${who(r.p.id)}</td><td>${gradeChip(r.p.grade)}</td><td class="num">${r.week}</td><td class="num">${r.total}</td></tr>`).join("")
+      ${rows.map(r => `<tr><td>${isGuest(state.me) ? who(r.p.id) : `<a href="#" data-act="openProfile" data-id="${r.p.id}">${esc(r.p.username)}</a>${adminBadge(r.p)}`}</td><td>${gradeChip(r.p.grade)}</td><td class="num">${r.week}</td><td class="num">${r.total}</td></tr>`).join("")
         || `<tr><td colspan="4" class="muted">Aucun animateur pour le moment.</td></tr>`}
       <tr><td><strong>Total</strong></td><td></td><td class="num"><strong>${sumWeek}</strong></td><td class="num"><strong>${sumTotal}</strong></td></tr>
     </table>
@@ -517,6 +556,181 @@ function viewTeam() {
   }).join("");
 }
 
+// ---- Outils : semaines et quotas
+function weekRange(offset) {               // [lundi 00:00, lundi suivant 00:00] ; offset -1 = semaine dernière
+  const a = startOfWeek(new Date());
+  a.setDate(a.getDate() + 7 * (offset || 0));
+  const b = new Date(a); b.setDate(b.getDate() + 7);
+  return [a, b];
+}
+const isCounted = p => !!p && p.approved && (p.grade === "animateur" || p.grade === "animateur_senior");
+const quotaOf   = p => (p.weekly_quota !== null && p.weekly_quota !== undefined ? p.weekly_quota : state.quota);
+
+// Nombre d'events acceptés d'une personne entre a et b (onlyDone : seulement ceux déjà terminés)
+function countFor(uid, a, b, onlyDone) {
+  return state.events.filter(e => e.status === "accepted" && e.requested_by === uid
+    && new Date(e.event_date) >= a && new Date(e.event_date) < b && (!onlyDone || isDone(e))).length;
+}
+// Les alertes ne s'affichent qu'à partir du jour réglé par ALERT_FROM_DAY
+function alertActive() { return ((new Date().getDay() + 6) % 7) + 1 >= ALERT_FROM_DAY; }
+
+// Où en est la personne cette semaine : "ok" (quota fait), "planned" (assez d'events prévus), "late" (pas assez)
+function quotaStatus(p) {
+  const [a, b] = weekRange(0), q = quotaOf(p);
+  const done = countFor(p.id, a, b, true), total = countFor(p.id, a, b, false);
+  return { q, done, total, state: (q === 0 || done >= q) ? "ok" : (total >= q ? "planned" : "late") };
+}
+function lastWeekResult(p) {               // null si la personne n'était pas encore là la semaine dernière
+  const [a, b] = weekRange(-1), q = quotaOf(p);
+  if (!p.created_at || new Date(p.created_at) >= b) return null;
+  const done = countFor(p.id, a, b, true);
+  return { q, done, ok: q === 0 || done >= q };
+}
+function streak(p) {                       // nombre de semaines d'affilée avec le quota atteint
+  const q = quotaOf(p);
+  if (!q) return 0;
+  let n = 0;
+  const [a0, b0] = weekRange(0);
+  if (countFor(p.id, a0, b0, true) >= q) n++;
+  for (let i = 1; i <= 52; i++) {
+    const [a, b] = weekRange(-i);
+    if (p.created_at && new Date(p.created_at) >= b) break;
+    if (countFor(p.id, a, b, true) >= q) n++; else break;
+  }
+  return n;
+}
+const lateList = () => Object.values(state.profiles).filter(isCounted).filter(p => quotaStatus(p).state === "late");
+
+// Bandeau d'alerte pour l'animateur qui est en retard sur son quota
+function quotaBanner() {
+  const me = state.me;
+  if (!isCounted(me) || !alertActive()) return "";
+  const s = quotaStatus(me);
+  if (s.state !== "late") return "";
+  const left = 7 - ((new Date().getDay() + 6) % 7);
+  const pend = state.events.filter(e => e.requested_by === me.id && e.status === "pending").length;
+  return `<div class="banner">⚠️ <strong>Quota de la semaine :</strong> ${s.done}/${s.q} fait(s), ${s.total - s.done} prévu(s).
+    Il te manque ${s.q - s.total} event(s), il reste ${left} jour(s).
+    ${pend ? `(${pend} demande(s) en attente, pas encore comptée(s).) ` : ""}<a href="#" data-act="tab" data-id="requests">Faire une demande</a></div>`;
+}
+
+// ---- Quotas : suivi de la semaine (responsables et gérants) ; le gérant règle les quotas
+function viewQuotas() {
+  const g = isGerant(state.me);
+  const chip = { ok: ["#22c55e", "✅ Atteint"], planned: ["#3b82f6", "🕒 Prévu"], late: ["#f59e0b", "⚠️ À planifier"] };
+  const rows = Object.values(state.profiles).filter(isCounted)
+    .map(p => ({ p, s: quotaStatus(p), l: lastWeekResult(p) }))
+    .sort((x, y) => ((y.s.state === "late") - (x.s.state === "late")) || x.p.username.localeCompare(y.p.username));
+  const day = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"][ALERT_FROM_DAY - 1];
+
+  return `<h2>Quotas hebdomadaires</h2>
+    <div class="card">
+      <h3>Quota par défaut</h3>
+      ${g ? `<div class="pwrow" style="max-width:320px;margin-top:8px"><input type="number" id="globalQuota" min="0" max="14" value="${state.quota}">
+            <button class="btn primary" data-act="saveGlobalQuota">Enregistrer</button></div>`
+          : `<p><strong>${state.quota}</strong> event(s) par semaine et par animateur.</p>`}
+      <p class="muted small">Chaque animateur et animateur senior doit faire ce nombre d'events par semaine (0 = dispensé).
+        ${g ? "Tu peux fixer un quota différent pour une personne dans le tableau." : "Seul un gérant peut modifier les quotas."}
+        Les alertes apparaissent à partir du ${day}.</p>
+    </div>
+    <p>⚠️ <strong>${rows.filter(r => r.s.state === "late").length}</strong> à planifier cette semaine ·
+       ❌ <strong>${rows.filter(r => r.l && !r.l.ok).length}</strong> quota manqué la semaine dernière</p>
+    <table>
+      <tr><th>Animateur</th><th class="num">Cette semaine</th><th>État</th><th class="num">Semaine dernière</th><th class="num">Quota</th></tr>
+      ${rows.map(({ p, s, l }) => `<tr>
+        <td><a href="#" data-act="openProfile" data-id="${p.id}">${esc(p.username)}</a> ${gradeChip(p.grade)}</td>
+        <td class="num">${s.done} fait(s)<br><span class="muted small">${s.total - s.done} prévu(s)</span></td>
+        <td><span class="chip" style="--c:${chip[s.state][0]}">${chip[s.state][1]}</span></td>
+        <td class="num">${l ? `${l.done}/${l.q} ${l.ok ? "✅" : "❌"}` : "—"}</td>
+        <td class="num">${g ? `<input type="number" min="0" max="14" style="width:80px;margin:0" data-act="setQuota" data-id="${p.id}"
+              value="${p.weekly_quota ?? ""}" placeholder="${state.quota}" title="Vide = quota par défaut">`
+            : `${quotaOf(p)}${p.weekly_quota != null ? " (perso)" : ""}`}</td></tr>`).join("")
+        || `<tr><td colspan="5" class="muted">Aucun animateur pour le moment.</td></tr>`}
+    </table>
+    ${g ? `<p class="muted small">Dans la colonne « Quota », laisse vide pour utiliser le quota par défaut (${state.quota}). Valide en appuyant sur Entrée ou en cliquant ailleurs.</p>` : ""}`;
+}
+
+// ---- Annonces : un texte prêt à copier pour chaque event à venir
+function programText() {
+  const [a, b] = weekRange(0);
+  const evs = state.events.filter(e => e.status === "accepted" && !isDone(e)
+    && new Date(e.event_date) >= a && new Date(e.event_date) < b).sort(byDate);
+  if (!evs.length) return "";
+  return ["📅 **Programme de la semaine**", ""]
+    .concat(evs.map(e => `• ${cap(fmtDay(e.event_date))} à ${fmtTime(e.event_date)} : **${e.title}**`)).join("\n");
+}
+
+function viewAnnounces() {
+  const list = state.events.filter(e => e.status === "accepted" && !isDone(e)).sort(byDate);
+  const prog = programText();
+  let html = `<h2>Annonces</h2>
+    <p class="muted small">Une annonce est préparée pour chaque event à venir (titre, mot de passe, date, heure, description, récompense).
+      Tu peux la modifier avant de la copier.</p>`;
+  if (prog) html += `<div class="card"><h3>📅 Programme de la semaine</h3>
+      <textarea class="ann" id="progText" rows="${prog.split("\n").length + 1}">${esc(prog)}</textarea>
+      <div class="actions"><button class="btn primary" data-act="copyProg">📋 Copier le programme</button></div></div>`;
+  html += list.length ? list.map(ev => {
+    const miss = [];
+    if (!state.passwords[ev.id]) miss.push("mot de passe");
+    if (!ev.description) miss.push("description");
+    if (!ev.reward) miss.push("récompense");
+    return `<div class="card">
+      <h3>${esc(ev.title)}</h3><div class="muted">📅 ${cap(fmtDay(ev.event_date))} à ${fmtTime(ev.event_date)}</div>
+      ${miss.length ? `<p class="warn small">⚠️ Il manque : ${miss.join(", ")} (« à définir » dans l'annonce, à remplacer à la main ci-dessous).</p>` : ""}
+      <textarea class="ann" data-ann="${ev.id}" rows="9">${esc(buildAnnouncement(ev))}</textarea>
+      <div class="actions"><button class="btn primary" data-act="copyAnn" data-id="${ev.id}">📋 Copier l'annonce</button>
+        <button class="btn ghost" data-act="resetAnn" data-id="${ev.id}">↺ Texte d'origine</button></div></div>`;
+  }).join("") : empty("Aucun event à venir : pas d'annonce à préparer.");
+  return html;
+}
+
+// ---- Profil : mes stats (ou celles d'un autre, en cliquant sur son nom dans Stats / Quotas)
+function viewProfile() {
+  const me = state.me, p = state.profiles[state.profileId] || me, own = p.id === me.id;
+  const mine = state.events.filter(e => e.requested_by === p.id);
+  const done = mine.filter(e => e.status === "accepted" && isDone(e)).sort(byDate);
+  const next = mine.filter(e => e.status === "accepted" && !isDone(e)).sort(byDate)[0];
+  const [wa, wb] = weekRange(0);
+  const ma = new Date(); ma.setDate(1); ma.setHours(0, 0, 0, 0);
+  const mb = new Date(ma); mb.setMonth(mb.getMonth() + 1);
+  const inRange = (e, a, b) => new Date(e.event_date) >= a && new Date(e.event_date) < b;
+  const last = done[done.length - 1];
+  const daysAgo = last ? Math.floor((Date.now() - startMs(last)) / 864e5) : null;
+  const short = d => new Date(d).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+
+  const tiles = [
+    [done.length, "Events réalisés"],
+    [done.filter(e => inRange(e, wa, wb)).length, "Cette semaine"],
+    [done.filter(e => inRange(e, ma, mb)).length, "Ce mois-ci"],
+    [last ? short(last.event_date) : "—", "Dernier event", last ? `${esc(last.title)} · ${daysAgo === 0 ? "aujourd'hui" : "il y a " + daysAgo + " jour(s)"}` : ""],
+    [next ? short(next.event_date) : "—", "Prochain event", next ? esc(next.title) : ""],
+    [state.events.filter(e => e.status === "accepted" && e.server_opener === p.id).length, "Serveurs ouverts"],
+    [state.events.filter(e => e.status === "accepted" && isDone(e) && (e.staff_ids || []).includes(p.id)).length, "Présent en staff"],
+  ];
+  if (level(p) >= 3) tiles.push([state.events.filter(e => e.gear_by === p.id).length, "Gears fournis"]);
+  if (isCounted(p) && quotaOf(p) > 0) tiles.push([`${streak(p)} sem.`, "Série (quota atteint)"]);
+  if (own || isManager(me)) {
+    const acc = mine.filter(e => e.status === "accepted").length, ref = mine.filter(e => e.status === "refused").length;
+    tiles.push([acc + ref ? Math.round(100 * acc / (acc + ref)) + " %" : "—", "Demandes acceptées", `${acc} acceptée(s) · ${ref} refusée(s) · ${mine.filter(e => e.status === "pending").length} en attente`]);
+  }
+  tiles.push([p.created_at ? short(p.created_at) : "—", "Membre depuis"]);
+
+  let quota = "";
+  if (isCounted(p)) {
+    const s = quotaStatus(p), pct = s.q ? Math.min(100, Math.round(100 * s.done / s.q)) : 100;
+    quota = `<div class="card"><h3>Quota de la semaine</h3>
+      <div>${s.done} fait(s) · ${s.total - s.done} prévu(s) · quota : <strong>${s.q}</strong> ${p.weekly_quota != null ? "(personnel)" : "(par défaut)"}</div>
+      <div class="bar"><i style="width:${pct}%"></i></div></div>`;
+  }
+  const recent = done.slice(-5).reverse();
+  return `${own ? "" : `<p><button class="btn ghost" data-act="openProfile" data-id="${me.id}">← Mon profil</button></p>`}
+    <h2>👤 ${esc(p.username)}${adminBadge(p)} ${gradeChip(p.grade)}</h2>
+    <div class="grid">${tiles.map(([v, l, sub]) => `<div class="stat"><b>${v}</b><span>${l}</span>${sub ? `<div class="muted small">${sub}</div>` : ""}</div>`).join("")}</div>
+    ${quota}
+    <h2>Derniers events</h2>
+    ${recent.length ? recent.map(e => `<div class="card"><strong>${esc(e.title)}</strong> <span class="muted">· ${cap(fmtDay(e.event_date))}</span></div>`).join("") : empty("Aucun event réalisé pour le moment.")}`;
+}
+
 // ---- Connexion / inscription
 function viewAuth() {
   const signup = state.authMode === "signup";
@@ -534,7 +748,8 @@ function viewAuth() {
     </div>`;
 }
 
-const VIEWS = { planning: viewPlanning, week: viewWeek, requests: viewRequests, history: viewHistory, stats: viewStats, team: viewTeam };
+const VIEWS = { planning: viewPlanning, week: viewWeek, requests: viewRequests, announces: viewAnnounces, history: viewHistory,
+                stats: viewStats, quotas: viewQuotas, team: viewTeam, profile: viewProfile };
 
 
 /* =====================================================================
@@ -563,10 +778,11 @@ function render() {
   const me = state.me;
   const counts = {
     requests: isManager(me) ? state.events.filter(e => e.status === "pending").length : 0,
+    quotas: isManager(me) && alertActive() ? lateList().length : 0,
     team: isManager(me) ? Object.values(state.profiles).filter(p => !p.approved).length : 0,
   };
 
-  const tabs = TABS.filter(t => !(t.noGuest && isGuest(me)));
+  const tabs = TABS.filter(t => !(t.noGuest && isGuest(me)) && !(t.managerOnly && !isManager(me)));
   if (!tabs.some(t => t.id === state.tab)) state.tab = tabs[0].id;
 
   app.innerHTML = `
@@ -577,6 +793,7 @@ function render() {
         <button class="btn ghost" data-act="logout">Déconnexion</button></div>
     </header>
     <nav>${tabs.map(t => `<button class="tab ${state.tab === t.id ? "on" : ""}" data-act="tab" data-id="${t.id}">${t.label}${counts[t.id] ? ` <span class="dot">${counts[t.id]}</span>` : ""}</button>`).join("")}</nav>
+    ${quotaBanner()}
     <main>${VIEWS[state.tab]()}</main>`;
 }
 
@@ -595,7 +812,8 @@ async function mutate(promise, okMsg) {
 
 const actions = {
   // navigation
-  tab:        async (id) => { state.tab = id; await refresh(); },
+  tab:        async (id) => { state.tab = id; if (id === "profile") state.profileId = null; await refresh(); },
+  openProfile: async (id) => { state.profileId = id === state.me.id ? null : id; state.tab = "profile"; await refresh(); },
   weekPrev:   () => { state.weekOffset--; render(); },
   weekNext:   () => { state.weekOffset++; render(); },
   weekToday:  () => { state.weekOffset = 0; render(); },
@@ -635,6 +853,25 @@ const actions = {
     el.closest(".staffchip")?.remove();
     const opt = document.querySelector(`select[data-act=addStaff] option[value="${id}"]`);
     if (opt) opt.disabled = false;
+  },
+
+  // annonces : copier / remettre le texte d'origine
+  copyAnn:  (id) => copyText(document.querySelector(`textarea[data-ann="${id}"]`)?.value, "Annonce copiée 📋"),
+  copyProg: () => copyText(document.getElementById("progText")?.value, "Programme copié 📋"),
+  resetAnn: (id) => {
+    const ev = state.events.find(e => e.id === id), t = document.querySelector(`textarea[data-ann="${id}"]`);
+    if (ev && t) t.value = buildAnnouncement(ev);
+  },
+
+  // quotas : le gérant règle le quota par défaut et les quotas personnels
+  saveGlobalQuota: () => {
+    const v = Math.max(0, Math.min(14, parseInt(document.getElementById("globalQuota").value, 10) || 0));
+    return mutate(db.from("app_settings").update({ weekly_quota: v }).eq("id", 1), "Quota par défaut enregistré");
+  },
+  setQuota: (id, el) => {
+    const raw = el.value.trim();
+    const v = raw === "" ? null : Math.max(0, Math.min(14, parseInt(raw, 10) || 0));
+    return mutate(db.from("profiles").update({ weekly_quota: v }).eq("id", id), v === null ? "Quota remis par défaut" : "Quota modifié");
   },
 
   // mot de passe : copier dans le presse-papier
@@ -713,6 +950,7 @@ async function submitRequest(form) {
     title: String(f.get("title")).trim(),
     description: String(f.get("description")).trim() || null,
     gear_note: String(f.get("gears")).trim() || null,
+    reward: String(f.get("reward") || "").trim() || null,
     staff_ids: f.getAll("staff").map(String),
     staff_names: String(f.get("staff_names") || "").split(",").map(n => n.trim().slice(0, 30)).filter(Boolean).slice(0, 20),
     event_date: date.toISOString(),
